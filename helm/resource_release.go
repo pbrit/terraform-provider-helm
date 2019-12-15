@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"golang.org/x/crypto/bcrypt"
 	"google.golang.org/grpc"
 
 	"github.com/ghodss/yaml"
@@ -121,6 +122,33 @@ func resourceRelease() *schema.Resource {
 						"value": {
 							Type:     schema.TypeString,
 							Required: true,
+						},
+					},
+				},
+			},
+			"set_bcrypt": {
+				Type:      schema.TypeSet,
+				Optional:  true,
+				Sensitive: true,
+
+				// TODO(pbrit): Elaborate the description
+				Description: "Custom string values to be merged with the values, the value will be bcrypted before saving.",
+				Elem: &schema.Resource{
+					Schema: map[string]*schema.Schema{
+						"name": {
+							Type:     schema.TypeString,
+							Required: true,
+						},
+						"value": {
+							Type:     schema.TypeString,
+							Required: true,
+						},
+						"cost": {
+							Type:     schema.TypeInt,
+							Optional: true,
+							Default:  bcrypt.DefaultCost,
+							Description: fmt.Sprintf("The cost for generating bcrypt hash. Minimum: %d. Maximum: %d. Default: %d.",
+								bcrypt.MinCost, bcrypt.DefaultCost, bcrypt.MaxCost),
 						},
 					},
 				},
@@ -609,6 +637,24 @@ func getValues(d *schema.ResourceData) ([]byte, error) {
 
 		if err := strvals.ParseIntoString(fmt.Sprintf("%s=%s", name, value), base); err != nil {
 			return nil, fmt.Errorf("failed parsing key %q with value %s, %s", name, value, err)
+		}
+	}
+
+	for _, raw := range d.Get("set_bcrypt").(*schema.Set).List() {
+		set := raw.(map[string]interface{})
+
+		name := set["name"].(string)
+		plainTextValue := set["value"].(string)
+		cost := set["cost"].(int)
+
+		bcryptedValue, err := bcrypt.GenerateFromPassword([]byte(plainTextValue), cost)
+
+		if err != nil {
+			return nil, fmt.Errorf("failed to bcrypt value for key %q, %s", name, err)
+		}
+
+		if err := strvals.ParseIntoString(fmt.Sprintf("%s=%s", name, string(bcryptedValue)), base); err != nil {
+			return nil, fmt.Errorf("failed parsing key %q with value %s, %s", name, string(bcryptedValue), err)
 		}
 	}
 
